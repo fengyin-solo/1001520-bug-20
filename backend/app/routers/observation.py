@@ -19,20 +19,36 @@ STATUSES = ["待质控", "质控通过", "疑误标记", "已作废"]
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按记录编号检索"),
+    station: str | None = Query(default=None, description="按所属站点检索"),
+    element: str | None = Query(default=None, description="按观测要素检索"),
     status: str | None = Query(default=None, description="待质控、质控通过、疑误标记、已作废"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
-    """按记录编号与状态过滤观测记录列表；没有数据时返回空页，不报错。"""
+    """按编号、站点、要素、状态过滤观测记录；统计与列表同口径，没有数据时返回空页。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
-    return PageResult(items=items, total=total, page=page, size=size)
+    items, total, stats = service.list_entries(
+        keyword=keyword, station=station, element=element, status=status, page=page, size=size
+    )
+    return PageResult(items=items, total=total, page=page, size=size, stats=stats)
+
+
+@router.get("/export")
+def export_entries(
+    keyword: str | None = Query(default=None, description="按记录编号检索"),
+    station: str | None = Query(default=None, description="按所属站点检索"),
+    element: str | None = Query(default=None, description="按观测要素检索"),
+    status: str | None = Query(default=None, description="待质控、质控通过、疑误标记、已作废"),
+) -> dict[str, Any]:
+    """导出观测记录清单：与列表同一份过滤结果，已作废记录保留并用记录状态列区分。"""
+    items, stats = service.export_entries(keyword=keyword, station=station, element=element, status=status)
+    return {"module": "observation", "total": len(items), "stats": stats, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
-    """读取单条观测记录明细；不存在时给出可读的错误说明。"""
+    """读取单条观测记录明细；与列表同一份数据，不存在时给出可读的错误说明。"""
     entry = service.get_entry(entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"观测记录 {entry_id} 不存在或已归档")
@@ -41,10 +57,10 @@ def get_entry(entry_id: int) -> dict:
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条观测记录，缺字段时说明原因而不是静默丢弃。"""
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    """登记一条观测记录；缺字段或记录编号重复时说明原因而不是静默丢弃。"""
+    entry, error = service.create_entry(payload.values)
+    if entry is None:
+        return ActionResult(ok=False, message=error)
     return ActionResult(ok=True, message="观测记录已登记", entry=entry)
 
 
@@ -56,10 +72,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出观测记录清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "observation", "total": total, "items": items}

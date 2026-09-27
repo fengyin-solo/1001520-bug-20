@@ -13,6 +13,8 @@ class PageResult(BaseModel, Generic[T]):
     total: int
     page: int = 1
     size: int = 20
+    # 与当前过滤条件同口径的统计，没接入统计的模块保持为 None
+    stats: dict[str, int] | None = None
 
 
 class ActionResult(BaseModel):
